@@ -1,52 +1,61 @@
 import streamlit as st
 import pandas as pd
-import subprocess
 import numpy as np
-from sklearn.linear_model import LinearRegression
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.pagesizes import A4
-from datetime import datetime
+import os
+import subprocess
+import shutil
+from datetime import timedelta
 
 # ---------------- PAGE CONFIG ----------------
-st.set_page_config(page_title="Company Growth AI Agent", layout="wide")
-
-# ---------------- CUSTOM CSS (PREMIUM KPI CARDS) ----------------
-st.markdown("""
-<style>
-.kpi-card {
-    background: linear-gradient(135deg, #1f2933, #111827);
-    padding: 20px;
-    border-radius: 16px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.35);
-    text-align: center;
-}
-.kpi-title {
-    font-size: 14px;
-    color: #9ca3af;
-    margin-bottom: 6px;
-}
-.kpi-value {
-    font-size: 28px;
-    font-weight: 700;
-    color: #ffffff;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.title("📈 Company Growth AI Agent")
-
-# ---------------- FILE UPLOAD ----------------
-file = st.file_uploader("Upload company CSV", type="csv")
-multi_files = st.file_uploader(
-    "Upload multiple company CSVs for comparison",
-    type="csv",
-    accept_multiple_files=True
+st.set_page_config(
+    page_title="Company Growth AI Agent",
+    page_icon="📈",
+    layout="wide"
 )
 
-question = st.text_input("Ask a question about your business")
+# ---------------- HELPER FUNCTIONS ----------------
+def is_ollama_available():
+    return shutil.which("ollama") is not None
 
-# ---------------- HELPERS ----------------
+
+def ask_ai(prompt):
+    # Detect Streamlit Cloud
+    IS_CLOUD = os.getenv("STREAMLIT_CLOUD") == "true"
+
+    if IS_CLOUD:
+        return (
+            "🧠 **Executive Summary (Preview Mode)**\n\n"
+            "This app is deployed on **Streamlit Cloud**, where local AI engines "
+            "(like Ollama) are not supported.\n\n"
+            "### What this means:\n"
+            "- Dashboards & KPIs ✅\n"
+            "- Forecasting ✅\n"
+            "- AI insights ❌ (cloud limitation)\n\n"
+            "👉 **To enable full AI analysis:**\n"
+            "1. Clone this repository\n"
+            "2. Install Ollama locally\n"
+            "3. Run:\n"
+            "`streamlit run app.py`\n\n"
+            "You’ll get instant, private AI insights 🚀"
+        )
+
+    # Local machine only
+    if shutil.which("ollama") is None:
+        return "❌ Ollama not found. Please install Ollama to enable AI insights."
+
+    try:
+        result = subprocess.run(
+            ["ollama", "run", "llama3:instruct"],
+            input=prompt,
+            text=True,
+            capture_output=True,
+            timeout=60,
+            errors="ignore"
+        )
+        return result.stdout.strip()
+
+    except Exception as e:
+        return f"⚠️ AI error: {e}"
 def detect_columns(df):
     date_col, revenue_col = None, None
     for col in df.columns:
@@ -57,186 +66,93 @@ def detect_columns(df):
             revenue_col = col
     return date_col, revenue_col
 
+# ---------------- HEADER ----------------
+st.title("📊 Company Growth AI Agent")
+st.caption("AI-powered business analytics & forecasting")
 
-def ask_ai(prompt):
-    result = subprocess.run(
-        ["ollama", "run", "llama3:instruct"],
-        input=prompt,
-        text=True,
-        capture_output=True,
-        encoding="utf-8",
-        errors="ignore"
-    )
-    return result.stdout.strip()
+# ---------------- FILE UPLOAD ----------------
+file = st.file_uploader("Upload company CSV", type="csv")
+question = st.text_input("Ask a business question (optional)")
 
+if not file:
+    st.info("⬆️ Upload a CSV file to begin analysis")
+    st.stop()
 
-def generate_pdf(df, summary_text):
-    filename = "Business_Growth_Report.pdf"
-    doc = SimpleDocTemplate(filename, pagesize=A4)
-    styles = getSampleStyleSheet()
-    elements = []
+# ---------------- DATA PROCESSING ----------------
+df = pd.read_csv(file)
+date_col, revenue_col = detect_columns(df)
 
-    elements.append(Paragraph("<b>Company Growth Analysis Report</b>", styles["Title"]))
-    elements.append(Spacer(1, 12))
-    elements.append(Paragraph(
-        f"Generated on: {datetime.now().strftime('%d %B %Y')}",
-        styles["Normal"]
-    ))
-    elements.append(Spacer(1, 12))
+if not date_col or not revenue_col:
+    st.error("❌ CSV must contain Date and Revenue/Sales columns")
+    st.stop()
 
-    elements.append(Paragraph("<b>Executive Summary</b>", styles["Heading2"]))
-    elements.append(Paragraph(summary_text, styles["Normal"]))
-    elements.append(Spacer(1, 12))
+df[date_col] = pd.to_datetime(df[date_col])
+df = df.sort_values(date_col)
 
-    table_data = [df.columns.tolist()] + df.round(2).values.tolist()
-    table = Table(table_data)
-    elements.append(table)
+df["Growth (%)"] = df[revenue_col].pct_change() * 100
 
-    doc.build(elements)
-    return filename
+# ---------------- KPI CARDS ----------------
+avg_growth = df["Growth (%)"].mean()
+best_rev = df[revenue_col].max()
+worst_rev = df[revenue_col].min()
+avg_rev = df[revenue_col].mean()
 
-# ---------------- SINGLE COMPANY LOGIC ----------------
-if file:
-    df = pd.read_csv(file)
-    date_col, revenue_col = detect_columns(df)
+st.markdown("## 📌 Key Performance Indicators")
 
-    if date_col and revenue_col:
-        df[date_col] = pd.to_datetime(df[date_col])
-        df = df.sort_values(date_col)
-        df["Growth (%)"] = df[revenue_col].pct_change() * 100
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("📈 Avg Growth %", f"{avg_growth:.2f}%")
+c2.metric("🏆 Best Revenue", f"{best_rev:,.0f}")
+c3.metric("⚠️ Worst Revenue", f"{worst_rev:,.0f}")
+c4.metric("💰 Avg Revenue", f"{avg_rev:,.0f}")
 
-        avg_growth = df["Growth (%)"].mean()
-        best_revenue = df[revenue_col].max()
-        worst_revenue = df[revenue_col].min()
-        avg_revenue = df[revenue_col].mean()
+# ---------------- DATA TABLE ----------------
+st.markdown("## 📋 Growth Analysis")
+st.dataframe(df[[date_col, revenue_col, "Growth (%)"]], use_container_width=True)
 
-        # ---------- PREMIUM KPI CARDS ----------
-        st.subheader("📌 Key Performance Indicators")
-        k1, k2, k3, k4 = st.columns(4)
+# ---------------- CHARTS ----------------
+st.markdown("## 📈 Revenue Trend")
+st.line_chart(df.set_index(date_col)[revenue_col])
 
-        k1.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">Avg Growth %</div>
-            <div class="kpi-value">{avg_growth:.2f}%</div>
-        </div>
-        """, unsafe_allow_html=True)
+st.markdown("## 📉 Growth Rate Trend")
+st.line_chart(df.set_index(date_col)["Growth (%)"])
 
-        k2.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">Best Revenue</div>
-            <div class="kpi-value">{best_revenue:.0f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+# ---------------- SIMPLE FORECAST ----------------
+st.markdown("## 🔮 Revenue Prediction (Next 3 Periods)")
 
-        k3.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">Worst Revenue</div>
-            <div class="kpi-value">{worst_revenue:.0f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+last_date = df[date_col].iloc[-1]
+avg_delta = df[revenue_col].diff().mean()
 
-        k4.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">Avg Revenue</div>
-            <div class="kpi-value">{avg_revenue:.0f}</div>
-        </div>
-        """, unsafe_allow_html=True)
+future = []
+current = df[revenue_col].iloc[-1]
 
-        # ---------- TABLE ----------
-        st.subheader("📊 Growth Analysis")
-        st.write(df[[date_col, revenue_col, "Growth (%)"]])
+for i in range(1, 4):
+    current += avg_delta
+    future.append({
+        "Period": f"Next {i}",
+        "Predicted Revenue": round(current, 2)
+    })
 
-        # ---------- CHARTS ----------
-        st.subheader("📈 Revenue Trend")
-        st.line_chart(df.set_index(date_col)[revenue_col])
+future_df = pd.DataFrame(future)
+st.table(future_df)
 
-        st.subheader("📉 Growth Rate Trend")
-        st.line_chart(df.set_index(date_col)["Growth (%)"])
+# ---------------- AI EXECUTIVE SUMMARY ----------------
+st.markdown("## 🧠 Executive Summary (AI)")
 
-        # ---------- REVENUE PREDICTION ----------
-        st.subheader("🔮 Revenue Prediction (Next 3 Periods)")
-        df["t"] = np.arange(len(df))
-        model = LinearRegression()
-        model.fit(df[["t"]], df[revenue_col])
+summary_prompt = f"""
+You are a senior business analyst.
 
-        future_t = np.array([[len(df)], [len(df) + 1], [len(df) + 2]])
-        future_revenue = model.predict(future_t)
+Revenue history: {df[revenue_col].tolist()}
+Growth rates: {df['Growth (%)'].round(2).tolist()}
+Best revenue: {best_rev}
+Worst revenue: {worst_rev}
+Average growth: {avg_growth:.2f}%
 
-        pred_df = pd.DataFrame({
-            "Future Period": ["Next 1", "Next 2", "Next 3"],
-            "Predicted Revenue": future_revenue.round(2)
-        })
-        st.write(pred_df)
+User question: {question if question else "Provide business insights"}
 
-        # ---------- FAST AI INSIGHT (BUTTON-BASED) ----------
-        st.subheader("🤖 AI Insight (Fast & Optimized)")
-
-        if st.button("🔍 Generate AI Insight") and question:
-            with st.spinner("Analyzing business metrics..."):
-                prompt = f"""
-You are a business analyst.
-
-Key metrics:
-- Avg revenue: {avg_revenue:.0f}
-- Best revenue: {best_revenue}
-- Worst revenue: {worst_revenue}
-- Avg growth %: {avg_growth:.2f}
-- Latest growth %: {df['Growth (%)'].iloc[-1]:.2f}
-
-Question:
-{question}
-
-Give a clear business answer in 4–6 lines.
+Give a concise executive summary with recommendations.
 """
-                ai_answer = ask_ai(prompt)
-                st.write(ai_answer)
 
-        # ---------- EXECUTIVE SUMMARY ----------
-        st.subheader("🧠 Executive Summary (AI)")
-        with st.spinner("Generating executive summary..."):
-            summary_prompt = f"""
-Write a short executive summary using:
-- Avg revenue: {avg_revenue:.0f}
-- Best revenue: {best_revenue}
-- Worst revenue: {worst_revenue}
-- Avg growth %: {avg_growth:.2f}
-"""
-            executive_summary = ask_ai(summary_prompt)
-            st.write(executive_summary)
+with st.spinner("Analyzing business performance..."):
+    executive_summary = ask_ai(summary_prompt)
 
-        # ---------- PDF REPORT ----------
-        st.subheader("📄 Download Business Report")
-        if st.button("Generate PDF Report"):
-            pdf_file = generate_pdf(
-                df[[date_col, revenue_col, "Growth (%)"]],
-                executive_summary
-            )
-            with open(pdf_file, "rb") as f:
-                st.download_button(
-                    "📥 Download PDF",
-                    f,
-                    file_name=pdf_file,
-                    mime="application/pdf"
-                )
-
-    else:
-        st.error("❌ Could not detect Date or Revenue column")
-
-# ---------------- MULTI COMPANY COMPARISON ----------------
-if multi_files and len(multi_files) > 1:
-    st.subheader("🏢 Multi-Company Comparison")
-
-    comparison = []
-    for f in multi_files:
-        temp_df = pd.read_csv(f)
-        d_col, r_col = detect_columns(temp_df)
-        if d_col and r_col:
-            temp_df["Growth (%)"] = temp_df[r_col].pct_change() * 100
-            comparison.append({
-                "Company": f.name,
-                "Avg Revenue": temp_df[r_col].mean(),
-                "Avg Growth %": temp_df["Growth (%)"].mean()
-            })
-
-    comp_df = pd.DataFrame(comparison)
-    st.write(comp_df)
+st.markdown(executive_summary)
