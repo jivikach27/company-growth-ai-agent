@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import os
+import requests
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
@@ -11,12 +12,15 @@ st.set_page_config(
 )
 
 # ---------------- GROK (xAI) CONFIG ----------------
-XAI_API_KEY = st.secrets.get("XAI_API_KEY")
+
 
 XAI_URL = "https://api.x.ai/v1/chat/completions"
 
 def ask_ai(prompt):
-    if not XAI_API_KEY:
+    # ✅ SAFE secret access (works on Streamlit Cloud)
+    try:
+        XAI_API_KEY = st.secrets["XAI_API_KEY"]
+    except Exception:
         return "❌ Grok API key not found. Please add it in Streamlit Secrets."
 
     headers = {
@@ -30,12 +34,22 @@ def ask_ai(prompt):
             {"role": "system", "content": "You are a senior business analyst."},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.3
+        "temperature": 0.3,
+        "max_tokens": 400
     }
 
     try:
-        response = requests.post(XAI_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
+        response = requests.post(
+    XAI_URL,
+
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            return f"⚠️ Grok API error: {response.text}"
+
         return response.json()["choices"][0]["message"]["content"]
 
     except Exception as e:
