@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import requests
-import os
-import requests
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
@@ -11,25 +9,23 @@ st.set_page_config(
     layout="wide"
 )
 
-# ---------------- GROK (xAI) CONFIG ----------------
-
-
-XAI_URL = "https://api.x.ai/v1/chat/completions"
+# ---------------- GROQ CONFIG ----------------
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def ask_ai(prompt):
-    # ✅ SAFE secret access (works on Streamlit Cloud)
+    # ✅ Safe secret access (Streamlit Cloud compatible)
     try:
-        XAI_API_KEY = st.secrets["XAI_API_KEY"]
+        GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
     except Exception:
-        return "❌ Grok API key not found. Please add it in Streamlit Secrets."
+        return "❌ GROQ API key not found. Please add it in Streamlit Secrets."
 
     headers = {
-        "Authorization": f"Bearer {XAI_API_KEY}",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
 
     payload = {
-        "model": "grok-2-latest",
+        "model": "llama3-70b-8192",
         "messages": [
             {"role": "system", "content": "You are a senior business analyst."},
             {"role": "user", "content": prompt}
@@ -40,15 +36,14 @@ def ask_ai(prompt):
 
     try:
         response = requests.post(
-    XAI_URL,
-
+            GROQ_URL,
             headers=headers,
             json=payload,
             timeout=30
         )
 
         if response.status_code != 200:
-            return f"⚠️ Grok API error: {response.text}"
+            return f"⚠️ GROQ API error: {response.text}"
 
         return response.json()["choices"][0]["message"]["content"]
 
